@@ -1,4 +1,4 @@
-FJS DIMENSION API v1.0.0-beta 
+FJS DIMENSION API v1.0.1-beta 
 ===============
 
 Author: FJS (Credit required for any use or modification)
