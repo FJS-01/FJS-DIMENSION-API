@@ -23,10 +23,12 @@ You can override defaults by setting them in a file loaded BEFORE this addon
 (e.g., lua/autorun/server/my_dim_config.lua).
 
 Example:
+```lua
     fjs_dimension.Config = fjs_dimension.Config or {}
     fjs_dimension.Config.DefaultDimension = 0
     fjs_dimension.Config.MaxDimension = 100
     fjs_dimension.Config.OverrideBullets = true
+```
 
 List of options:
 
