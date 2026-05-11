@@ -1,0 +1,17 @@
+# Windows
+Thumbs.db
+desktop.ini
+
+# Mac
+.DS_Store
+
+# Garry's Mod compiled Lua
+*.lua.bin
+*.lua.o
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
