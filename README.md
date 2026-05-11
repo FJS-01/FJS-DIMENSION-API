@@ -1,7 +1,8 @@
-================================================================================
-FJS DIMENSION API v1.0.0-beta
-================================================================================
+FJS DIMENSION API v1.0.0-beta 
+===============
+
 Author: FJS (Credit required for any use or modification)
+
 Status: UNSTABLE - ACTIVE DEVELOPMENT - USE AT YOUR OWN RISK
 
 DISCLAIMER:
@@ -14,9 +15,8 @@ DISCLAIMER:
 - Active development is ongoing; API may change without notice.
 - Known issues are listed at the end of this document.
 
-================================================================================
-1. CONFIGURATION OPTIONS
-================================================================================
+CONFIGURATION OPTIONS
+   ===================
 
 All options are stored in the global table: fjs_dimension.Config
 You can override defaults by setting them in a file loaded BEFORE this addon
@@ -113,38 +113,37 @@ List of options:
   Time in seconds after which a server‑side ragdoll (created from an NPC
   death) is automatically removed to save resources.
 
-================================================================================
-2. SERVER-SIDE HOOKS
+SERVER-SIDE HOOKS
 ================================================================================
 
 These hooks are called by the system and can be used in your own code.
 
-2.1 hook "FJSDimensionPlayerChanged"
+- 2.1 hook "FJSDimensionPlayerChanged"
     Called after a player's dimension changes.
     Parameters:
         ply - Player
         oldDim - number (previous dimension)
         newDim - number (new dimension)
 
-2.2 hook "FJSDimensionEntityChanged"
+- 2.2 hook "FJSDimensionEntityChanged"
     Called after any non-player entity's dimension changes.
     Parameters:
         ent - Entity
         oldDim - number
         newDim - number
 
-2.3 hook "FJSDimensionChanged"
+- 2.3 hook "FJSDimensionChanged"
     Called for any entity (players and non-players) after dimension change.
     Parameters: same as above.
 
-2.4 hook "FJSDimensionCanChange"
+- 2.4 hook "FJSDimensionCanChange"
     Called BEFORE a dimension change. Return false to prevent the change.
     Parameters:
         ent - Entity
         oldDim - number
         newDim - number
 
-2.5 hook "FJSDimensionLocalPlayerChanged" (also on client)
+- 2.5 hook "FJSDimensionLocalPlayerChanged" (also on client)
     Called on the client when the local player's dimension changes.
     Parameters:
         oldDim - number
@@ -167,30 +166,29 @@ EXAMPLE (place in any server Lua file):
     end)
 ```
 
-================================================================================
-3. UTILITY FUNCTIONS
+UTILITY FUNCTIONS
 ================================================================================
 
 These functions are provided for interacting with the dimension system.
 
-3.1 Entity:SetDimension(id)
+- 3.1 Entity:SetDimension(id)
     Sets the dimension of an entity. Handles network propagation, collision
     checks, visibility updates, and NPC relationship updates.
     Parameters: id (number)
     Returns: nothing
 
-3.2 Entity:GetDimension()
+- 3.2 Entity:GetDimension()
     Returns the current dimension ID of the entity (number).
 
-3.3 fjs_dimension.GetPlayersInDimension(dim)
+- 3.3 fjs_dimension.GetPlayersInDimension(dim)
     Returns a table (array) of all Player objects currently in that dimension.
 
-3.4 fjs_dimension.GetEntitiesInDimension(dim)
+- 3.4 fjs_dimension.GetEntitiesInDimension(dim)
     Returns a table (array) of all entities (props, NPCs, etc.) that are
     cached as belonging to that dimension. Note: the cache updates
     automatically but may have a slight delay.
 
-3.5 fjs_dimension.PlaySoundInDimension(dim, soundPath, pos, volume, pitch, level)
+- 3.5 fjs_dimension.PlaySoundInDimension(dim, soundPath, pos, volume, pitch, level)
     Plays a sound only for players in the specified dimension.
     Parameters:
         dim (number)
@@ -201,7 +199,7 @@ These functions are provided for interacting with the dimension system.
         level (number, sound level, default 75)
     Returns: nothing
 
-3.6 fjs_dimension.Decal(dim, decalName, startPos, endPos)
+- 3.6 fjs_dimension.Decal(dim, decalName, startPos, endPos)
     Sends a decal to all players in the specified dimension.
     Parameters:
         dim (number)
@@ -209,23 +207,23 @@ These functions are provided for interacting with the dimension system.
         startPos (Vector)
         endPos (Vector)
 
-3.7 fjs_dimension.SyncVisibility(ent)
+- 3.7 fjs_dimension.SyncVisibility(ent)
     Forces a visibility recalculation for an entity. Normally called
     automatically after dimension changes, but can be used if you manually
     alter visibility flags.
 
-3.8 fjs_dimension.RebuildDimensionCache()
+- 3.8 fjs_dimension.RebuildDimensionCache()
     Rebuilds the internal lookup table of entities per dimension. Useful
     after duplicator operations or if you suspect the cache is out of sync.
 
-3.9 fjs_dimension.GetTrueEntityOwner(ent)
+- 3.9 fjs_dimension.GetTrueEntityOwner(ent)
     Recursively finds the ultimate player owner of an entity, even through
     weapons or projectiles. Returns NULL if none found.
 
-3.10 fjs_dimension.SetEntityDimension(ent, dim)
+- 3.10 fjs_dimension.SetEntityDimension(ent, dim)
     Alternative way to set an entity's dimension. Equivalent to ent:SetDimension(dim).
 
-3.11 fjs_dimension.SendNetToDimension(dim)
+- 3.11 fjs_dimension.SendNetToDimension(dim)
     Sends the current net message (must have been defined with net.Start)
     to all players in the given dimension. Returns true if at least one
     recipient existed.
@@ -245,19 +243,19 @@ EXAMPLES:
     net.WriteString("Hello!")
     fjs_dimension.SendNetToDimension(7)
 ```
-================================================================================
-4. CLIENT-SIDE FUNCTIONS
-================================================================================
+
+CLIENT-SIDE FUNCTIONS
+=============
 
 Most client functionality is internal, but you can use the following:
 
-4.1 LocalPlayer():GetDimension()
+- 4.1 LocalPlayer():GetDimension()
     Works on the client like on the server.
 
-4.2 hook "FJSDimensionLocalPlayerChanged"
+- 4.2 hook "FJSDimensionLocalPlayerChanged"
     Triggered when the local player's dimension changes.
 
-4.3 The client automatically blocks visual effects, sounds, and decals from
+- 4.3 The client automatically blocks visual effects, sounds, and decals from
     other dimensions. Bullet tracers and impact effects are also filtered.
 
 EXAMPLE (client-side):
@@ -269,9 +267,8 @@ EXAMPLE (client-side):
     end)
 ```
 
-================================================================================
-5. COMPLETE USAGE EXAMPLES
-================================================================================
+COMPLETE USAGE EXAMPLES
+============
 
 ```lua
 Example 1: Admin command to change own dimension (already included but you can extend)
@@ -312,9 +309,9 @@ Example 4: Server-side NPC spawner that respects the player's dimension
     end
 ```
 
-================================================================================
-6. KNOWN ISSUES & LIMITATIONS (as of v1.0.0-beta)
-================================================================================
+
+KNOWN ISSUES & LIMITATIONS (as of v1.0.0-beta)
+===========
 
 1. Sound Leakage
    - Some weapon sounds from addons may still be heard across dimensions.
@@ -361,17 +358,12 @@ Example 4: Server-side NPC spawner that respects the player's dimension
    - The chunked NPC updates and fast sanity checks help, but keep an eye
      on performance if you have over 5000 entities.
 
-================================================================================
-7. SUPPORT & CONTRIBUTIONS
-================================================================================
+
+SUPPORT & CONTRIBUTIONS
+==================
 
 - This is an open-source project under active development.
 - You are encouraged to fix bugs and improve the code.
 - If you distribute a modified version, you MUST keep the original credits
   and clearly state your changes.
-- For bug reports or feature requests, contact the author via the original
-  addon page (if any) or the community forums.
-
-================================================================================
-END OF README
-================================================================================
+- For bug reports or feature requests, contact in discord: fjs01.
