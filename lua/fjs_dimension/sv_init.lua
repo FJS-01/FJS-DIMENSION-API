@@ -1,4 +1,3 @@
-
 fjs_dimension = fjs_dimension or {}
 fjs_dimension.ActiveNPCs = fjs_dimension.ActiveNPCs or {}
 fjs_dimension.LastSpawnIntent = fjs_dimension.LastSpawnIntent or {}
@@ -15,6 +14,27 @@ local og_sv_Decal = util.Decal
 local og_sv_Effect = util.Effect
 local Config = fjs_dimension.Config or {}
 local ForceNPCPacify
+
+local instantVisualClasses = {
+    ["env_explosion"] = true,
+    ["env_physexplosion"] = true,
+    ["info_particle_system"] = true,
+    ["env_spark"] = true,
+    ["env_fire"] = true,
+    ["ar2explosion"] = true
+}
+
+local instantClasses = {
+    ["env_explosion"] = true,
+    ["env_physexplosion"] = true,
+    ["info_particle_system"] = true,
+    ["env_spark"] = true,
+    ["env_fire"] = true,
+    ["ar2explosion"] = true,
+    ["instanced_scripted_scene"] = true,
+    ["logic_choreographed_scene"] = true,
+    ["scripted_scene"] = true
+}
 
 fjs_dimension.Perf = fjs_dimension.Perf or {
     enabled = false,
@@ -416,7 +436,6 @@ local function FindNearestDimensionAtPosition(pos, radius)
         if not IsValid(ply) or not ply.GetDimension then continue end
 
         local dist = ply:GetPos():DistToSqr(pos)
-
         if dist < bestDist then
             bestDist = dist
             bestDim = ply:GetDimension()
@@ -455,6 +474,20 @@ local function SendWorldSoundToDimension(dim, soundName, pos, volume, pitch, lev
     net.Send(recipients)
 end
 
+-- Propagación recursiva estricta de visibilidad (Mejora Garry Phone)
+local function RecursiveSetPreventTransmit(ent, ply, shouldHide)
+    if not IsValid(ent) or not IsValid(ply) then return end
+
+    ent.FJS_Dim_Hidden = shouldHide -- Caché rápida en Lua
+    ent:SetPreventTransmit(ply, shouldHide)
+
+    if ent.GetChildren then
+        for _, child in ipairs(ent:GetChildren()) do
+            RecursiveSetPreventTransmit(child, ply, shouldHide)
+        end
+    end
+end
+
 function fjs_dimension.SyncVisibility(targetEnt)
     local perf = FJSPerfStart("SyncVisibility")
 
@@ -476,12 +509,15 @@ function fjs_dimension.SyncVisibility(targetEnt)
 
             local class = ent:GetClass()
             if class == "gmod_hands" or class == "viewmodel" then continue end
+            
             if ent.GetOwner and ent:GetOwner() == targetEnt then 
-                ent:SetPreventTransmit(targetEnt, false)
+                RecursiveSetPreventTransmit(ent, targetEnt, false)
                 continue 
             end
+            
             if ent.GetDimension then
-                ent:SetPreventTransmit(targetEnt, ent:GetDimension() ~= plyDim)
+                local shouldHide = ent:GetDimension() ~= plyDim
+                RecursiveSetPreventTransmit(ent, targetEnt, shouldHide)
             end
         end
 
@@ -495,27 +531,35 @@ function fjs_dimension.SyncVisibility(targetEnt)
         if not IsValid(ply) then continue end
 
         if targetEnt.GetOwner and targetEnt:GetOwner() == ply then
-            targetEnt:SetPreventTransmit(ply, false)
+            RecursiveSetPreventTransmit(targetEnt, ply, false)
             continue
         end
 
         local shouldHide = entDim ~= ply:GetDimension()
-        targetEnt:SetPreventTransmit(ply, shouldHide)
+        RecursiveSetPreventTransmit(targetEnt, ply, shouldHide)
 
         if targetEnt.GetActiveWeapon and IsValid(targetEnt:GetActiveWeapon()) then
-            targetEnt:GetActiveWeapon():SetPreventTransmit(ply, shouldHide)
-        end
-
-        if targetEnt.GetChildren then
-            for _, child in ipairs(targetEnt:GetChildren()) do
-                if IsValid(child) then
-                    child:SetPreventTransmit(ply, shouldHide)
-                end
-            end
+            RecursiveSetPreventTransmit(targetEnt:GetActiveWeapon(), ply, shouldHide)
         end
     end
 
     FJSPerfEnd("SyncVisibility", perf)
+end
+
+-- Función recursiva para propagar IDs de dimensión en jerarquías profundas
+local function RecursiveSetChildDimension(ent, id)
+    if not IsValid(ent) or not ent.GetChildren then return end
+
+    for _, child in ipairs(ent:GetChildren()) do
+        if IsValid(child) then
+            RegisterEntityInDimensionCache(child, id)
+            child:SetCustomCollisionCheck(true)
+            child:SetNW2Int("m_dim_id", id)
+            duplicator.StoreEntityModifier(child, "m_dim_persistence", { dimID = id })
+            
+            RecursiveSetChildDimension(child, id)
+        end
+    end
 end
 
 function entMeta:SetDimension(id)
@@ -558,7 +602,7 @@ function entMeta:SetDimension(id)
                 RegisterEntityInDimensionCache(wep, id)
                 wep:SetCustomCollisionCheck(true)
                 wep:SetNW2Int("m_dim_id", id)
-                wep:SetPreventTransmit(self, false)
+                RecursiveSetPreventTransmit(wep, self, false)
             end
         end
     elseif self.GetActiveWeapon and IsValid(self:GetActiveWeapon()) then
@@ -569,17 +613,8 @@ function entMeta:SetDimension(id)
         wep:SetNW2Int("m_dim_id", id)
     end
 
-    if self.GetChildren then
-        for _, child in ipairs(self:GetChildren()) do
-            if IsValid(child) then
-                RegisterEntityInDimensionCache(child, id)
-
-                child:SetCustomCollisionCheck(true)
-                child:SetNW2Int("m_dim_id", id)
-                duplicator.StoreEntityModifier(child, "m_dim_persistence", { dimID = id })
-            end
-        end
-    end
+    -- Propagar dimensión de manera completamente recursiva a todos los hijos
+    RecursiveSetChildDimension(self, id)
 
     timer.Simple(0, function()
         if IsValid(self) then
@@ -672,12 +707,87 @@ function fjs_dimension.PlaySoundInDimension(dim, snd, pos, volume, pitch, level)
         net.WriteUInt(math.Clamp(math.floor(tonumber(level) or 75), 0, 255), 8)
     net.Send(recipients)
 end
+fjs_dimension.InternalSoundGuard = fjs_dimension.InternalSoundGuard or false
 
+hook.Add("EntityEmitSound", "M_Dimensions_StrictSoundIsolator", function(data)
+    if fjs_dimension.InternalSoundGuard then return end
 
+    local ent = data.Entity
+    if not IsValid(ent) or ent:IsWorld() then return end 
 
+    if IsProjectileLike(ent) then return end
+
+    local trueOwner = fjs_dimension.GetTrueEntityOwner(ent)
+    if IsValid(trueOwner) and trueOwner.GetDimension then
+        local ownerDim = trueOwner:GetDimension()
+        if ent.GetDimension and ent:GetDimension() ~= ownerDim then
+            ent:SetDimension(ownerDim)
+        end
+    end
+
+    local checkEnt = IsValid(trueOwner) and trueOwner or ent
+
+    if checkEnt.GetDimension then
+        local dim = checkEnt:GetDimension()
+        local snd = string.lower(data.SoundName or "")
+        
+        local isPredicted = false
+        if checkEnt:IsPlayer() then
+            local isCombatPred = string.find(snd, "weapon") or string.find(snd, "step") or string.find(snd, "fire") or string.find(snd, "shot")
+            if ent:IsWeapon() or data.Channel == CHAN_WEAPON or isCombatPred then
+                isPredicted = true
+            end
+        end
+
+        local filter = RecipientFilter()
+        local hasRecipients = false
+
+        for _, p in ipairs(player.GetAll()) do
+            if p:GetDimension() == dim then
+                if isPredicted and p == checkEnt then continue end
+                filter:AddPlayer(p)
+                hasRecipients = true
+            end
+        end
+
+        if not hasRecipients then 
+            return false 
+        end
+
+        -- =====================================================================
+        -- RE-EMISIÓN NATIVA (La magia ocurre aquí)
+        -- =====================================================================
+        fjs_dimension.InternalSoundGuard = true
+
+        checkEnt:EmitSound(
+            data.SoundName,
+            data.SoundLevel or 75,
+            data.Pitch or 100,
+            data.Volume or 1,
+            data.Channel or CHAN_AUTO,
+            data.SoundFlags or 0,
+            data.Dsp or 0,
+            filter 
+        )
+
+        fjs_dimension.InternalSoundGuard = false
+
+        return false 
+    end
+end)
+
+--[[
 hook.Add("EntityEmitSound", "M_Dimensions_StrictSoundIsolator", function(data)
     local ent = data.Entity
     if not IsValid(ent) or ent:IsWorld() then return end 
+
+    if ent:IsVehicle() then return end 
+
+
+    local snd = string.lower(data.SoundName or "")
+    if string.find(snd, "idle") and ent:GetClass() == "class_C_BaseEntity" then
+        return
+    end
 
     local trueOwner = fjs_dimension.GetTrueEntityOwner(ent)
     if IsValid(trueOwner) and trueOwner.GetDimension then
@@ -691,7 +801,6 @@ hook.Add("EntityEmitSound", "M_Dimensions_StrictSoundIsolator", function(data)
 
     if checkEnt.GetDimension then
         local dim = checkEnt:GetDimension()
-        local snd = string.lower(data.SoundName or "")
         
         local isPredicted = false
         if checkEnt:IsPlayer() then
@@ -714,6 +823,7 @@ hook.Add("EntityEmitSound", "M_Dimensions_StrictSoundIsolator", function(data)
             local sendPos = data.Pos or checkEnt:GetPos()
             local sendVol = data.Volume or 1
             local sendPitch = math.Clamp(data.Pitch or 100, 0, 255)
+            local entIndex = checkEnt:EntIndex() -- Capturamos el ID numérico bruto
 
             timer.Simple(0, function()
                 local validRecipients = {}
@@ -724,6 +834,7 @@ hook.Add("EntityEmitSound", "M_Dimensions_StrictSoundIsolator", function(data)
                 if #validRecipients > 0 then
                     net.Start("FJS_Dim_PlaySoundWorld", true) 
                         net.WriteString(sendSnd)
+                        net.WriteUInt(entIndex, 16) -- MANDAMOS EL ID BRUTO (Evita el desface de red)
                         net.WriteVector(sendPos)
                         net.WriteFloat(sendVol)
                         net.WriteUInt(sendPitch, 8)
@@ -731,9 +842,12 @@ hook.Add("EntityEmitSound", "M_Dimensions_StrictSoundIsolator", function(data)
                 end
             end)
         end
+        
         return false 
     end
-end)
+end)]]
+
+
 
 function fjs_dimension.Decal(dim, name, startPos, endPos)
     dim = NormalizeDimension(dim)
@@ -986,6 +1100,18 @@ end
 local function ResolveSpawnOwner(ent)
     if not IsValid(ent) then return NULL end
 
+    -- Escalado de jerarquía de padres (Mejora inspirada en Garry Phone)
+    local parent = ent:GetParent()
+    while IsValid(parent) do
+        if parent.GetDimension and parent:GetDimension() ~= 0 then
+            return parent
+        end
+        if parent.GetOwner and IsValid(parent:GetOwner()) then
+            return parent:GetOwner()
+        end
+        parent = parent:GetParent()
+    end
+
     if IsValid(ent.PlayerCreator) then
         return ent.PlayerCreator
     end
@@ -1099,6 +1225,37 @@ local function TryApplyInheritedDimension(ent, attempt)
     fjs_dimension.SyncVisibility(ent)
 end
 
+local function ResolveSpawnOwner(ent)
+    if not IsValid(ent) then return NULL end
+
+    local parent = ent:GetParent()
+    while IsValid(parent) do
+        if parent.GetDimension and parent:GetDimension() ~= 0 then return parent end
+        if parent.GetOwner and IsValid(parent:GetOwner()) then return parent:GetOwner() end
+        parent = parent:GetParent()
+    end
+
+    if IsValid(ent:GetOwner()) then return ent:GetOwner() end
+    if ent.GetCreator and IsValid(ent:GetCreator()) then return ent:GetCreator() end
+    if ent.GetPlayer and IsValid(ent:GetPlayer()) then return ent:GetPlayer() end
+    if IsValid(ent.PlayerCreator) then return ent.PlayerCreator end
+
+    if ent.CPPIGetOwner then
+        local ok, owner = pcall(ent.CPPIGetOwner, ent)
+        if ok and IsValid(owner) then return owner end
+    end
+
+    if ent.GetInternalVariable then
+        local ok, internalOwner = pcall(ent.GetInternalVariable, ent, "m_hOwnerEntity")
+        if ok and IsValid(internalOwner) then return internalOwner end
+    end
+
+    local trueOwner = fjs_dimension.GetTrueEntityOwner(ent)
+    if IsValid(trueOwner) then return trueOwner end
+
+    return GetMostRecentSpawnIntent()
+end
+
 hook.Add("OnEntityCreated", "FJS_Dim_AutoSetup", function(ent)
     if ent:IsWeapon() then
         timer.Simple(0, function()
@@ -1109,8 +1266,41 @@ hook.Add("OnEntityCreated", "FJS_Dim_AutoSetup", function(ent)
                 end
             end
         end)
+        return
     end
     
+    local class = ent:GetClass() or ""
+
+    if instantClasses[class] or string.find(class, "explosion") or string.find(class, "scene") or IsProjectileLike(ent) then
+        local owner = ResolveSpawnOwner(ent)
+        local targetDim = 0
+
+        if IsValid(owner) and owner.GetDimension then
+            targetDim = owner:GetDimension()
+        else
+            local pos = ent:GetPos()
+            local searchRadius = (pos.x == 0 and pos.y == 0 and pos.z == 0) and 30000 or 500
+            
+            targetDim = FindNearestDimensionAtPosition(pos, searchRadius) or 0
+        end
+
+        ent:SetNW2Int("m_dim_id", targetDim)
+        RegisterEntityInDimensionCache(ent, targetDim)
+        ent:SetCustomCollisionCheck(true)
+
+        for _, ply in ipairs(player.GetAll()) do
+            if IsValid(ply) and ply:GetDimension() ~= targetDim then
+                ent:SetPreventTransmit(ply, true)
+                if ent.GetChildren then
+                    for _, child in ipairs(ent:GetChildren()) do
+                        if IsValid(child) then child:SetPreventTransmit(ply, true) end
+                    end
+                end
+            end
+        end
+        return
+    end
+
     timer.Simple(0, function()
         TryApplyInheritedDimension(ent, 1)
     end)
@@ -1184,12 +1374,11 @@ end)
 
 hook.Add("PlayerSpawn", "FJS_Dim_RestoreDimension", function(ply)
     local savedDim = ply:GetNW2Int("m_dim_id", fjs_dimension.Config.DefaultDimension or 0)
-    print("Restoring dimension for " .. tostring(ply) .. ": " .. tostring(savedDim))    
     
     timer.Simple(0.1, function()
         if IsValid(ply) then
             ply:SetDimension(savedDim)
-            ply:SetPreventTransmit(ply, false) 
+            RecursiveSetPreventTransmit(ply, ply, false) 
         end
     end)
 end)
@@ -1202,7 +1391,7 @@ hook.Add("PlayerLoadout", "FJS_Dim_EnsureLoadoutVisibility", function(ply)
             for _, wep in ipairs(ply:GetWeapons()) do
                 if IsValid(wep) then
                     wep:SetDimension(dim)
-                    wep:SetPreventTransmit(ply, false)
+                    RecursiveSetPreventTransmit(wep, ply, false)
                 end
             end
         end

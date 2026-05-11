@@ -10,6 +10,9 @@ local og_cl_Effect = util.Effect
 local bulletTracers = {}
 local bulletTracerMat = Material("trails/laser")
 
+fjs_dimension_pending_sounds = fjs_dimension_pending_sounds or {}
+fjs_dimension_active_patches = fjs_dimension_active_patches or {}
+
 local function GetClientTrueOwner(ent)
     if not IsValid(ent) then return NULL end
 
@@ -177,11 +180,33 @@ end)
 
 net.Receive("FJS_Dim_PlaySoundWorld", function()
     local snd = net.ReadString()
+    local entID = net.ReadUInt(16)
     local pos = net.ReadVector()
     local vol = net.ReadFloat()
     local pitch = net.ReadUInt(8)
-    
-    sound.Play(snd, pos, 75, pitch, vol)
+
+    local ent = Entity(entID)
+    local isLoop = string.find(string.lower(snd), "engine") or string.find(string.lower(snd), "loop") or string.find(string.lower(snd), "missile")
+
+    if IsValid(ent) and not ent:IsWorld() then
+        local patch = CreateSound(ent, snd)
+        patch:SetSoundLevel(75)
+        patch:PlayEx(vol, pitch)
+        
+        fjs_dimension_active_patches[ent] = fjs_dimension_active_patches[ent] or {}
+        fjs_dimension_active_patches[ent][snd] = patch
+        
+    elseif entID > 0 and entID < 65535 then
+        fjs_dimension_pending_sounds[entID] = {
+            snd = snd, pitch = pitch, vol = vol, expire = CurTime() + 0.4
+        }
+        
+        if not isLoop then
+            sound.Play(snd, pos, 75, pitch, vol)
+        end
+    else
+        sound.Play(snd, pos, 75, pitch, vol)
+    end
 end)
 
 hook.Add("PostDrawTranslucentRenderables", "FJS_Dim_DrawBulletTracers", function()
@@ -205,6 +230,37 @@ hook.Add("PostDrawTranslucentRenderables", "FJS_Dim_DrawBulletTracers", function
     end
 end)
 
+hook.Add("OnEntityCreated", "FJS_Dim_AttachPendingSounds", function(ent)
+    local id = ent:EntIndex()
+    
+    if fjs_dimension_pending_sounds[id] then
+        local data = fjs_dimension_pending_sounds[id]
+        
+        if CurTime() <= data.expire then
+            local patch = CreateSound(ent, data.snd)
+            patch:SetSoundLevel(75)
+            patch:PlayEx(data.vol, data.pitch)
+            
+            fjs_dimension_active_patches[ent] = fjs_dimension_active_patches[ent] or {}
+            fjs_dimension_active_patches[ent][data.snd] = patch
+        end
+        
+        fjs_dimension_pending_sounds[id] = nil
+    end
+end)
+
+hook.Add("EntityRemoved", "FJS_Dim_KillOrphanedSounds", function(ent)
+    if fjs_dimension_active_patches[ent] then
+        for _, patch in pairs(fjs_dimension_active_patches[ent]) do
+            if patch and patch.Stop then
+                patch:Stop()
+            end
+        end
+        fjs_dimension_active_patches[ent] = nil
+    end
+    
+    fjs_dimension_pending_sounds[ent:EntIndex()] = nil
+end)
 
 local function IsOrphanDimensionalLeak(soundName)
     local snd = string.lower(soundName or "")
@@ -239,35 +295,64 @@ local function IsOrphanDimensionalLeak(soundName)
         or string.find(snd, "combine", 1, true)
 end
 
-hook.Add("EntityEmitSound", "M_Dimensions_IsolateSounds", function(data)
-    if allowLocalVisuals then return end
+hook.Add("EntityEmitSound", "FJS_Dim_ClientAudioSilencer", function(data)
     local ply = LocalPlayer()
     if not IsValid(ply) then return end
 
     local myDim = ply:GetDimension()
     local ent = data.Entity
+    local snd = string.lower(data.SoundName or "")
 
-    if IsValid(ent) then
-        if ent == ply then return end
+    local isProjectileSound = string.find(snd, "rocket") 
+        or string.find(snd, "missile") 
+        or string.find(snd, "rpg") 
+        or string.find(snd, "grenade")
 
-        local checkEnt = ent
-        local trueOwner = GetClientTrueOwner(ent)
+    local targetDim = -1
 
-        if IsValid(trueOwner) then
-            checkEnt = trueOwner
+    if IsValid(ent) and not ent:IsWorld() then
+        local nwDim = ent:GetNW2Int("m_dim_id", -1)
+        if nwDim ~= -1 then 
+            targetDim = nwDim 
         end
 
-        if checkEnt.GetDimension then
-            local entDim = checkEnt:GetDimension()
-            if entDim ~= myDim then
-                return false
+        if targetDim == -1 or (targetDim == 0 and isProjectileSound) then
+            local owner = ent:GetOwner()
+            if not IsValid(owner) and ent.GetThrower then owner = ent:GetThrower() end
+            if not IsValid(owner) and ent.GetParent and IsValid(ent:GetParent()) then 
+                owner = ent:GetParent() 
+            end
+
+            if IsValid(owner) and owner.GetDimension then
+                targetDim = owner:GetDimension()
+            else
+                local pos = data.Pos or ent:GetPos()
+                local bestDist = 400 * 400
+                for _, p in ipairs(player.GetAll()) do
+                    local dist = p:GetPos():DistToSqr(pos)
+                    if dist < bestDist then
+                        bestDist = dist
+                        targetDim = p:GetDimension()
+                    end
+                end
             end
         end
-        return
     end
 
-    if IsOrphanDimensionalLeak(data.SoundName) then
+    if targetDim ~= -1 and targetDim ~= myDim then
         return false
+    end
+
+    if not IsValid(ent) or ent:IsWorld() then
+        local isCombatBleed = isProjectileSound 
+            or string.find(snd, "weapon") 
+            or string.find(snd, "explode") 
+            or string.find(snd, "c4")
+            or string.find(snd, "hit")
+
+        if isCombatBleed then
+            return false -- Silencio absoluto
+        end
     end
 end)
 
