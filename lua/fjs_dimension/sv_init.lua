@@ -521,8 +521,6 @@ function fjs_dimension.SyncVisibility(targetEnt)
             end
         end
 
-        FJSPerfEnd("SyncVisibility", perf)
-        return
     end
 
     local entDim = targetEnt:GetDimension()
