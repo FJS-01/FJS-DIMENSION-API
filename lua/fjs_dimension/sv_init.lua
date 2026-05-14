@@ -326,6 +326,60 @@ function fjs_dimension.FastNPCEnemySanityCheck()
     FJSPerfEnd("FastNPCEnemySanityCheck", perf)
 end
 
+function fjs_dimension.CreateDimensionalClone(originalEnt, targetDim)
+    if not IsValid(originalEnt) then return NULL end
+
+    targetDim = fjs_dimension.NormalizeDimension(targetDim)
+    local class = originalEnt:GetClass()
+
+    if not originalEnt.m_fjs_pacified then
+        originalEnt:SetNoDraw(true)
+        originalEnt:SetNotSolid(true)
+        
+        if string.find(class, "door") then
+            originalEnt:Fire("Lock")
+        end
+        
+        originalEnt.m_fjs_pacified = true
+    end
+
+    local clone = ents.Create(class)
+    if not IsValid(clone) then return NULL end
+
+    clone:SetModel(originalEnt:GetModel() or "")
+    clone:SetPos(originalEnt:GetPos())
+    clone:SetAngles(originalEnt:GetAngles())
+    clone:SetSkin(originalEnt:GetSkin() or 0)
+    clone:SetColor(originalEnt:GetColor())
+    clone:SetMaterial(originalEnt:GetMaterial() or "")
+
+    if class == "prop_door_rotating" then
+        clone:SetKeyValue("hardware", "1")
+        clone:SetKeyValue("speed", "100")
+        clone:SetKeyValue("returndelay", "-1")
+        clone:SetKeyValue("spawnflags", "0")
+    end
+
+    clone:Spawn()
+    clone:Activate()
+
+    for i = 0, (originalEnt:GetNumBodyGroups() - 1) do
+        clone:SetBodygroup(i, originalEnt:GetBodygroup(i))
+    end
+
+    local phys = clone:GetPhysicsObject()
+    if IsValid(phys) and not string.find(class, "door") then
+        phys:Wake()
+    end
+
+    clone:SetDimension(targetDim)
+
+    clone.m_fjs_isClone = true
+    clone.m_fjs_originalEnt = originalEnt
+
+    return clone
+end
+
 hook.Add("InitPostEntity", "FJS_Dim_RebuildDimensionCacheOnLoad", function()
     timer.Simple(1, function()
         if fjs_dimension.RebuildDimensionCache then
@@ -467,10 +521,10 @@ local function SendWorldSoundToDimension(dim, soundName, pos, volume, pitch, lev
 
     net.Start("FJS_Dim_PlaySoundWorld")
         net.WriteString(soundName or "")
+        net.WriteUInt(0, 16)
         net.WriteVector(pos or vector_origin)
         net.WriteFloat(tonumber(volume) or 1)
         net.WriteUInt(math.Clamp(math.floor(tonumber(pitch) or 100), 0, 255), 8)
-        net.WriteUInt(math.Clamp(math.floor(tonumber(level) or 75), 0, 255), 8)
     net.Send(recipients)
 end
 
@@ -699,10 +753,10 @@ function fjs_dimension.PlaySoundInDimension(dim, snd, pos, volume, pitch, level)
 
     net.Start("FJS_Dim_PlaySoundWorld", true)
         net.WriteString(tostring(snd or ""))
+        net.WriteUInt(0, 16)
         net.WriteVector(pos or vector_origin)
         net.WriteFloat(tonumber(volume) or 1)
         net.WriteUInt(math.Clamp(math.floor(tonumber(pitch) or 100), 0, 255), 8)
-        net.WriteUInt(math.Clamp(math.floor(tonumber(level) or 75), 0, 255), 8)
     net.Send(recipients)
 end
 fjs_dimension.InternalSoundGuard = fjs_dimension.InternalSoundGuard or false
@@ -714,6 +768,28 @@ hook.Add("EntityEmitSound", "M_Dimensions_StrictSoundIsolator", function(data)
     if not IsValid(ent) or ent:IsWorld() then return end 
 
     if IsProjectileLike(ent) then return end
+
+    -- Evitar interceptar actualizaciones de estado (paradas o cambios de pitch/volumen).
+    -- Interrumpir CSoundPatches nativos rompe los handles internos de Source Engine,
+    -- provocando loops infinitos y huérfanos en los clientes.
+    local flags = data.SoundFlags or 0
+    if bit.band(flags, 1) ~= 0 or bit.band(flags, 2) ~= 0 or bit.band(flags, 4) ~= 0 or bit.band(flags, 32) ~= 0 then
+        return
+    end
+
+    -- Permitir que vehículos y loops pasen de forma nativa. El cliente ya se encarga
+    -- de silenciarlos en su propio EntityEmitSound si la dimensión no coincide.
+    if ent:IsVehicle() then return end
+
+    local snd = string.lower(data.SoundName or "")
+    if string.find(snd, "engine", 1, true) 
+        or string.find(snd, "loop", 1, true) 
+        or string.find(snd, "motor", 1, true) 
+        or string.find(snd, "idle", 1, true) 
+        or string.find(snd, "thruster", 1, true) 
+        or string.find(snd, "rotor", 1, true) then
+        return
+    end
 
     local trueOwner = fjs_dimension.GetTrueEntityOwner(ent)
     if IsValid(trueOwner) and trueOwner.GetDimension then
@@ -727,7 +803,6 @@ hook.Add("EntityEmitSound", "M_Dimensions_StrictSoundIsolator", function(data)
 
     if checkEnt.GetDimension then
         local dim = checkEnt:GetDimension()
-        local snd = string.lower(data.SoundName or "")
         
         local isPredicted = false
         if checkEnt:IsPlayer() then

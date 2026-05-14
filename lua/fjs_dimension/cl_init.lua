@@ -50,12 +50,28 @@ local function RunAllowedVisual(fn)
     end
 end
 
+local function StopAllActivePatches()
+    for ent, patches in pairs(fjs_dimension_active_patches) do
+        if istable(patches) then
+            for snd, patch in pairs(patches) do
+                if patch and patch.Stop then
+                    patch:Stop()
+                end
+            end
+        end
+    end
+    fjs_dimension_active_patches = {}
+    fjs_dimension_pending_sounds = {}
+end
+
 local function StopDimensionLoopingSounds()
     if CurTime() < nextStopSoundTime then return end
 
     nextStopSoundTime = CurTime() + 0.15
+    StopAllActivePatches()
     timer.Simple(0, function() RunConsoleCommand("stopsound") end)
     timer.Simple(0.05, function() RunConsoleCommand("stopsound") end)
+    timer.Simple(0.1, function() RunConsoleCommand("stopsound") end)
 end
 
 function util.Decal(name, startPos, endPos, filter)
@@ -96,6 +112,7 @@ function util.Effect(name, eff, allowOverride, ignorePrediction)
 
     return og_cl_Effect(name, eff, allowOverride, ignorePrediction)
 end
+
 
 net.Receive("FJS_Dim_CustomDecal", function()
     local name = net.ReadString()
@@ -189,6 +206,11 @@ net.Receive("FJS_Dim_PlaySoundWorld", function()
     local isLoop = string.find(string.lower(snd), "engine") or string.find(string.lower(snd), "loop") or string.find(string.lower(snd), "missile")
 
     if IsValid(ent) and not ent:IsWorld() then
+        if fjs_dimension_active_patches[ent] and fjs_dimension_active_patches[ent][snd] then
+            local old = fjs_dimension_active_patches[ent][snd]
+            if old and old.Stop then old:Stop() end
+        end
+        
         local patch = CreateSound(ent, snd)
         patch:SetSoundLevel(75)
         patch:PlayEx(vol, pitch)
@@ -210,6 +232,8 @@ net.Receive("FJS_Dim_PlaySoundWorld", function()
 end)
 
 hook.Add("PostDrawTranslucentRenderables", "FJS_Dim_DrawBulletTracers", function()
+    if not IsValid(LocalPlayer()) then return end
+    if Config.OverrideEffects == false then return end
     if #bulletTracers <= 0 then return end
 
     local now = CurTime()
@@ -231,12 +255,18 @@ hook.Add("PostDrawTranslucentRenderables", "FJS_Dim_DrawBulletTracers", function
 end)
 
 hook.Add("OnEntityCreated", "FJS_Dim_AttachPendingSounds", function(ent)
+    if not IsValid(ent) then return end
     local id = ent:EntIndex()
     
     if fjs_dimension_pending_sounds[id] then
         local data = fjs_dimension_pending_sounds[id]
         
         if CurTime() <= data.expire then
+            if fjs_dimension_active_patches[ent] and fjs_dimension_active_patches[ent][data.snd] then
+                local old = fjs_dimension_active_patches[ent][data.snd]
+                if old and old.Stop then old:Stop() end
+            end
+            
             local patch = CreateSound(ent, data.snd)
             patch:SetSoundLevel(75)
             patch:PlayEx(data.vol, data.pitch)
@@ -296,6 +326,7 @@ local function IsOrphanDimensionalLeak(soundName)
 end
 
 hook.Add("EntityEmitSound", "FJS_Dim_ClientAudioSilencer", function(data)
+    if Config.OverrideEffects == false then return end
     local ply = LocalPlayer()
     if not IsValid(ply) then return end
 
